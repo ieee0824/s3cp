@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"flag"
+	"fmt"
 	"log"
 	"os"
 	"strconv"
@@ -43,6 +44,7 @@ var (
 	-max 100k
 	-max 1M
 	`)
+	reverse = flag.Bool("r", false, "Reverse the order of the sort to get reverse lexicographical order or the oldest entries first (or largest files last, if combined with sort by size")
 )
 
 func parseRateLimit(r string) float64 {
@@ -111,5 +113,22 @@ func getCredential() (*credentials.Credentials, error) {
 	return nil, errors.New("no credentials")
 }
 
+func uploadNonReverse(src, dst string) error {
+	file, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return err
+	}
+	if info.IsDir() {
+		return errors.New(fmt.Sprintf("src is directory"))
+	}
+	return upload(src, dst)
+}
+
 func main() {
+	flag.Parse()
 }
