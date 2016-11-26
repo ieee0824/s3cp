@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 
@@ -90,7 +91,9 @@ func parseRateLimit(r string) float64 {
 }
 
 func upload(src, dst string) error {
-	fmt.Println(src, dst)
+	dst = strings.TrimPrefix(dst, ".")
+	dst = strings.TrimPrefix(dst, "/")
+	dst = "/" + dst
 	file, err := os.Open(src)
 	if err != nil {
 		return err
@@ -100,9 +103,7 @@ func upload(src, dst string) error {
 		Region:      aws.String(*region),
 	}
 	rate := parseRateLimit(*maxRate)
-	fmt.Println(int(rate))
-
-	limiter := ratelimit.NewBucketWithRate(rate, 100*1024)
+	limiter := ratelimit.NewBucketWithRate(rate, 64)
 	uploader := s3manager.NewUploader(session.New(&config))
 	_, err = uploader.Upload(&s3manager.UploadInput{
 		Bucket: aws.String(*bucket),
@@ -198,6 +199,7 @@ func traverse(root string, queue chan<- string, e chan<- error) {
 }
 
 func main() {
+	runtime.GOMAXPROCS(runtime.NumCPU())
 	flag.Parse()
 	log.SetFlags(log.Lshortfile)
 
@@ -224,6 +226,14 @@ func main() {
 			log.Fatalln(err)
 		}
 	} else {
+		p := strings.Split(dst, "/")
+		fileName := func(s string) string {
+			buf := strings.Split(s, "/")
+			return buf[len(buf)-1]
+		}(src)
+		if p[len(p)-1] == "" {
+			dst = dst + fileName
+		}
 		err := uploadNonReverse(src, dst)
 		if err != nil {
 			log.Fatalln(err)
