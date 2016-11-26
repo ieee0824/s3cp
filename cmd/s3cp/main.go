@@ -48,6 +48,12 @@ func parseRateLimit(r string) float64 {
 			log.Fatalln(err)
 		}
 		return float64(i) * 1024 * 1024
+	} else {
+		i, err := strconv.Atoi(r)
+		if err != nil {
+			log.Fatalln(err)
+		}
+		return float64(i)
 	}
 	log.Fatalln(errors.New("illegal format"))
 	return 0
