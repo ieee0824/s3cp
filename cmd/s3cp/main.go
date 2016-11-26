@@ -9,23 +9,53 @@ import (
 	"strconv"
 	"strings"
 
+	"flag"
+
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3/s3manager"
-	optarg "github.com/jteeuwen/go-pkg-optarg"
 	"github.com/juju/ratelimit"
 )
 
 var (
-	accessKey   string
-	secretKey   string
-	bucket      string
-	region      string
-	profileName string
-	cred        *credentials.Credentials
-	maxRate     string
-	reverse     bool
+	accessKey = flag.String(
+		"access_key",
+		getEnv("AWS_ACCESS_KEY", ""),
+		"デフォルトは環境変数",
+	)
+	secretKey = flag.String(
+		"secret_key",
+		getEnv("AWS_SECRET_KEY", ""),
+		"デフォルトは環境変数",
+	)
+	bucket = flag.String(
+		"b",
+		getEnv("S3_BUCKET_NAME", ""),
+		"デフォルトは環境変数",
+	)
+	region = flag.String(
+		"region",
+		getEnv("S3_REGION_NAME", "ap-northeast-1"),
+		"s3リージョン",
+	)
+
+	profileName = flag.String(
+		"profile",
+		"default",
+		"awsのクレデンシャル",
+	)
+	cred    *credentials.Credentials
+	maxRate = flag.String(
+		"m",
+		"",
+		"-m 1024k, -m 1024m",
+	)
+	reverse = flag.Bool(
+		"r",
+		false,
+		"再帰的にファイルをコピーする",
+	)
 )
 
 func parseRateLimit(r string) float64 {
@@ -60,22 +90,26 @@ func parseRateLimit(r string) float64 {
 }
 
 func upload(src, dst string) error {
+	fmt.Println(src, dst)
 	file, err := os.Open(src)
 	if err != nil {
 		return err
 	}
 	config := aws.Config{
 		Credentials: cred,
-		Region:      aws.String(region),
+		Region:      aws.String(*region),
 	}
+	rate := parseRateLimit(*maxRate)
+	fmt.Println(int(rate))
 
-	limiter := ratelimit.NewBucketWithRate(parseRateLimit(maxRate), 100*1024)
+	limiter := ratelimit.NewBucketWithRate(rate, 100*1024)
 	uploader := s3manager.NewUploader(session.New(&config))
 	_, err = uploader.Upload(&s3manager.UploadInput{
-		Bucket: aws.String(bucket),
+		Bucket: aws.String(*bucket),
 		Key:    aws.String(dst),
 		Body:   ratelimit.Reader(file, limiter),
 	})
+
 	return err
 }
 
@@ -90,10 +124,12 @@ func getEnv(key string, def string) string {
 
 func getCredential() (*credentials.Credentials, error) {
 	var result *credentials.Credentials
-	if len(profileName) != 0 {
-		result = credentials.NewSharedCredentials("", profileName)
+	if len(*accessKey) != 0 && len(*secretKey) != 0 {
+		return credentials.NewStaticCredentials(*accessKey, *secretKey, ""), nil
+	} else if len(*profileName) != 0 {
+		result = credentials.NewSharedCredentials("", *profileName)
 		if result == nil {
-			return nil, errors.New("no credentials")
+			return nil, errors.New("no credential")
 		}
 		return result, nil
 	}
@@ -162,86 +198,27 @@ func traverse(root string, queue chan<- string, e chan<- error) {
 }
 
 func main() {
-	optarg.Header("s3 Options")
-	optarg.Add(
-		"",
-		"access_key",
-		"AWSのアクセスキー. 未設定のときは環境変数の値が使用される.",
-		getEnv("AWS_ACCESS_KEY", ""),
-	)
-	optarg.Add(
-		"",
-		"secret_key",
-		"AWSのシークレットキー. 未設定のときは環境変数の値が使用される.",
-		getEnv("AWS_SECRET_KEY", ""),
-	)
-	optarg.Add(
-		"b",
-		"bucket",
-		"バケット名",
-		getEnv("S3_BUCKET_NAME", ""),
-	)
-	optarg.Add(
-		"",
-		"region",
-		"s3のリージョン名",
-		getEnv("S3_REGION_NAME", "ap-northeast-1"),
-	)
-	optarg.Add(
-		"p",
-		"profile",
-		"使用するプロファイル",
-		"",
-	)
+	flag.Parse()
+	log.SetFlags(log.Lshortfile)
 
-	optarg.Header("tx Options")
-	optarg.Add(
-		"m",
-		"max_rate",
-		"最大転送速度",
-		"",
-	)
-	optarg.Add(
-		"r",
-		"reverse",
-		"再帰モード",
-		false,
-	)
-	for opt := range optarg.Parse() {
-		switch opt.Name {
-		case "access_key":
-			accessKey = opt.String()
-		case "secret_key":
-			secretKey = opt.String()
-		case "bucket":
-			bucket = opt.String()
-		case "region":
-			region = opt.String()
-		case "profile":
-			profileName = opt.String()
-		case "max_rate":
-			maxRate = opt.String()
-		case "reverse":
-			reverse = opt.Bool()
-		}
-	}
 	var (
 		src string
 		dst string
 		err error
 	)
 
-	if len(optarg.Remainder) != 2 {
-		log.Fatalln(errors.New("引数が不正です"))
+	args := flag.Args()
+	if len(args) != 2 {
+		log.Fatalln("引数が不正です")
 	}
-	src = optarg.Remainder[0]
-	dst = optarg.Remainder[1]
+	src = args[0]
+	dst = args[1]
 	cred, err = getCredential()
 	if err != nil {
 		log.Fatalln(err)
 	}
 
-	if reverse {
+	if *reverse {
 		err := uploadReverse(src, dst)
 		if err != nil {
 			log.Fatalln(err)
@@ -252,6 +229,4 @@ func main() {
 			log.Fatalln(err)
 		}
 	}
-
-	//uploadReverse(".", "")
 }
