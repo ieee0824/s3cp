@@ -2,5 +2,5 @@
 
 ## コマンド例
 ```
-time go run cmd/s3cp/main.go -b test-s3-cp -m 500m ./test/test.dat /hoge.dat
+time go run s3cp -b ${S3_BUCKET_NAME} -m 500m /path/to/file /path/to/target
 ```
